@@ -1,6 +1,16 @@
-# Falky
+<p align="center">
+  <img src="logo.svg" width="64" height="64" alt="Falky">
+</p>
 
-A CLI tool for generating images with [fal.ai](https://fal.ai). Supports multiple models, batch generation, upscaling, and background removal.
+<h1 align="center">Falky</h1>
+
+<p align="center">
+  CLI for generating images with <a href="https://fal.ai">fal.ai</a>
+</p>
+
+---
+
+Supports multiple models, batch generation, upscaling, and background removal.
 
 ## Installation
 
