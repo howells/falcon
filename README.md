@@ -21,6 +21,12 @@ brew tap howells/tap
 brew install falcon
 ```
 
+### bunx (No install)
+
+```bash
+bunx @howells/falcon "your prompt"
+```
+
 ### Manual Install
 
 Requires [Bun](https://bun.sh) runtime.
