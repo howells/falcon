@@ -1,321 +1,545 @@
-import React, { useState, useEffect } from "react";
+import { existsSync } from "node:fs";
+import { basename, resolve } from "node:path";
 import { Box, Text, useInput } from "ink";
 import TextInput from "ink-text-input";
-import { generate, upscale, removeBackground } from "../../api/fal";
-import { MODELS, estimateCost } from "../../api/models";
+import { useEffect, useState } from "react";
+import { generate, removeBackground, upscale } from "../../api/fal";
 import {
-  downloadImage,
-  generateFilename,
-  openImage,
-  getImageDimensions,
-  getFileSize,
-  imageToDataUrl,
-  resizeImage,
-} from "../../utils/image";
+	type AspectRatio,
+	estimateCost,
+	MODELS,
+	type Resolution,
+} from "../../api/models";
 import {
-  addGeneration,
-  generateId,
-  getLastGeneration,
-  type FalconConfig,
-  type Generation,
+	addGeneration,
+	type FalconConfig,
+	type Generation,
+	generateId,
+	loadHistory,
 } from "../../utils/config";
-import { resolve } from "path";
+import {
+	downloadImage,
+	generateFilename,
+	getFileSize,
+	getImageDimensions,
+	imageToDataUrl,
+	openImage,
+} from "../../utils/image";
+import { Spinner } from "../components/Spinner";
 
 type Mode = "edit" | "variations" | "upscale" | "rmbg";
-type Step = "loading" | "prompt" | "scale" | "confirm" | "processing" | "done";
+type Step =
+	| "select"
+	| "operation"
+	| "prompt"
+	| "scale"
+	| "confirm"
+	| "processing"
+	| "done";
+
+const OPERATIONS: { key: Mode; label: string; description: string }[] = [
+	{ key: "edit", label: "Edit", description: "Modify with a new prompt" },
+	{
+		key: "variations",
+		label: "Variations",
+		description: "Generate similar images",
+	},
+	{ key: "upscale", label: "Upscale", description: "Enhance resolution" },
+	{
+		key: "rmbg",
+		label: "Remove Background",
+		description: "Transparent PNG output",
+	},
+];
 
 interface EditScreenProps {
-  config: FalconConfig;
-  mode: Mode;
-  onBack: () => void;
-  onComplete: () => void;
-  onError: (err: Error) => void;
+	config: FalconConfig;
+	onBack: () => void;
+	onComplete: () => void;
+	onError: (err: Error) => void;
 }
 
-export function EditScreen({ config, mode, onBack, onComplete, onError }: EditScreenProps) {
-  const [step, setStep] = useState<Step>("loading");
-  const [lastGen, setLastGen] = useState<Generation | null>(null);
-  const [prompt, setPrompt] = useState("");
-  const [scale, setScale] = useState(2);
-  const [status, setStatus] = useState("");
-  const [result, setResult] = useState<{ path: string; dims: string; size: string } | null>(null);
+export function EditScreen({
+	config,
+	onBack,
+	onComplete,
+	onError,
+}: EditScreenProps) {
+	const [step, setStep] = useState<Step>("select");
+	const [mode, setMode] = useState<Mode | null>(null);
+	const [generations, setGenerations] = useState<Generation[]>([]);
+	const [selectedGen, setSelectedGen] = useState<Generation | null>(null);
+	const [selectedIndex, setSelectedIndex] = useState(0);
+	const [operationIndex, setOperationIndex] = useState(0);
+	const [customPath, setCustomPath] = useState("");
+	const [useCustomPath, setUseCustomPath] = useState(false);
+	const [prompt, setPrompt] = useState("");
+	const [scale, setScale] = useState(2);
+	const [status, setStatus] = useState("");
+	const [result, setResult] = useState<{
+		path: string;
+		dims: string;
+		size: string;
+	} | null>(null);
 
-  useEffect(() => {
-    loadLast();
-  }, []);
+	// For custom path mode, create a pseudo-generation object
+	const getSourceImage = (): {
+		output: string;
+		prompt: string;
+		model: string;
+		aspect: AspectRatio;
+		resolution: Resolution;
+	} => {
+		if (useCustomPath && customPath) {
+			return {
+				output: customPath.trim(),
+				prompt: basename(customPath),
+				model: config.defaultModel,
+				aspect: config.defaultAspect,
+				resolution: config.defaultResolution,
+			};
+		}
+		return selectedGen as Generation;
+	};
 
-  const loadLast = async () => {
-    const last = await getLastGeneration();
-    if (!last) {
-      onError(new Error("No previous generation found"));
-      onBack();
-      return;
-    }
-    setLastGen(last);
+	useEffect(() => {
+		const loadGenerations = async () => {
+			const history = await loadHistory();
+			if (history.generations.length === 0) {
+				setUseCustomPath(true);
+			} else {
+				setGenerations([...history.generations].reverse());
+				setSelectedGen(history.generations[history.generations.length - 1]);
+			}
+		};
+		loadGenerations();
+	}, []);
 
-    // Set initial step based on mode
-    if (mode === "edit") {
-      setStep("prompt");
-    } else if (mode === "variations") {
-      setPrompt(last.prompt);
-      setStep("confirm");
-    } else if (mode === "upscale") {
-      setStep("scale");
-    } else if (mode === "rmbg") {
-      setStep("confirm");
-    }
-  };
+	const proceedFromSelect = () => {
+		if (useCustomPath) {
+			const path = customPath.trim();
+			if (!path) return;
+			if (!existsSync(path)) {
+				onError(new Error(`File not found: ${path}`));
+				return;
+			}
+		} else if (!selectedGen) {
+			return;
+		}
+		setStep("operation");
+		setOperationIndex(0);
+	};
 
-  useInput((input, key) => {
-    if (key.escape) {
-      if (step === "processing") return;
-      if (step === "done") {
-        onComplete();
-      } else {
-        onBack();
-      }
-      return;
-    }
+	const proceedFromOperation = () => {
+		const selectedMode = OPERATIONS[operationIndex].key;
+		setMode(selectedMode);
 
-    if (step === "scale") {
-      if (key.upArrow && scale < 8) {
-        setScale(scale + 1);
-      } else if (key.downArrow && scale > 1) {
-        setScale(scale - 1);
-      } else if (key.return) {
-        setStep("confirm");
-      }
-    } else if (step === "confirm") {
-      if (key.return || input === "y") {
-        runProcess();
-      } else if (input === "n") {
-        onBack();
-      }
-    } else if (step === "done") {
-      if (key.return) {
-        onComplete();
-      }
-    }
-  });
+		if (selectedMode === "edit") {
+			setStep("prompt");
+		} else if (selectedMode === "variations") {
+			const source = getSourceImage();
+			setPrompt(source.prompt);
+			setStep("confirm");
+		} else if (selectedMode === "upscale") {
+			setStep("scale");
+		} else if (selectedMode === "rmbg") {
+			setStep("confirm");
+		}
+	};
 
-  const handlePromptSubmit = (value: string) => {
-    if (value.trim()) {
-      setPrompt(value.trim());
-      setStep("confirm");
-    }
-  };
+	useInput((input, key) => {
+		if (key.escape) {
+			if (step === "processing") return;
+			if (step === "done") {
+				onComplete();
+			} else if (step === "select") {
+				onBack();
+			} else if (step === "operation") {
+				setStep("select");
+			} else {
+				// Go back to operation step
+				setStep("operation");
+			}
+			return;
+		}
 
-  const runProcess = async () => {
-    if (!lastGen) return;
+		if (step === "select" && !useCustomPath) {
+			if (key.upArrow && selectedIndex > 0) {
+				setSelectedIndex(selectedIndex - 1);
+				setSelectedGen(generations[selectedIndex - 1]);
+			} else if (key.downArrow && selectedIndex < generations.length - 1) {
+				setSelectedIndex(selectedIndex + 1);
+				setSelectedGen(generations[selectedIndex + 1]);
+			} else if (key.tab) {
+				setUseCustomPath(true);
+			} else if (key.return) {
+				proceedFromSelect();
+			} else if (input && !key.ctrl && !key.meta) {
+				// User typed/pasted text (e.g. dragged a file) - switch to custom path mode
+				setCustomPath(input);
+				setUseCustomPath(true);
+			}
+		} else if (step === "select" && useCustomPath) {
+			if (key.tab && generations.length > 0) {
+				setUseCustomPath(false);
+			}
+			// TextInput handles the rest
+		} else if (step === "operation") {
+			if (key.upArrow && operationIndex > 0) {
+				setOperationIndex(operationIndex - 1);
+			} else if (key.downArrow && operationIndex < OPERATIONS.length - 1) {
+				setOperationIndex(operationIndex + 1);
+			} else if (key.return) {
+				proceedFromOperation();
+			}
+		} else if (step === "scale") {
+			if (key.upArrow && scale < 8) {
+				setScale(scale + 1);
+			} else if (key.downArrow && scale > 1) {
+				setScale(scale - 1);
+			} else if (key.return) {
+				setStep("confirm");
+			}
+		} else if (step === "confirm") {
+			if (key.return || input === "y") {
+				runProcess();
+			} else if (input === "n") {
+				setStep("operation");
+			}
+		} else if (step === "done") {
+			if (key.return) {
+				onComplete();
+			}
+		}
+	});
 
-    setStep("processing");
+	const handlePromptSubmit = (value: string) => {
+		if (value.trim()) {
+			setPrompt(value.trim());
+			setStep("confirm");
+		}
+	};
 
-    try {
-      let outputPath: string;
-      let cost = 0;
-      let promptLabel = "";
+	const runProcess = async () => {
+		const source = getSourceImage();
+		if (!source || !mode) return;
 
-      if (mode === "edit") {
-        setStatus("Preparing image...");
-        const resized = await resizeImage(lastGen.output, 1024);
-        const imageData = await imageToDataUrl(resized);
+		setStep("processing");
 
-        setStatus("Generating edit...");
-        const result = await generate({
-          prompt,
-          model: "gpt", // GPT supports editing
-          editImage: imageData,
-        });
+		try {
+			let outputPath: string;
+			let cost = 0;
+			let promptLabel = "";
 
-        outputPath = generateFilename("edit");
-        await downloadImage(result.images[0].url, outputPath);
-        cost = estimateCost("gpt");
-        promptLabel = prompt;
-      } else if (mode === "variations") {
-        setStatus("Generating variations...");
-        const result = await generate({
-          prompt: lastGen.prompt,
-          model: lastGen.model,
-          aspect: lastGen.aspect,
-          resolution: lastGen.resolution,
-          numImages: 1,
-        });
+			if (mode === "edit") {
+				setStatus("Preparing image...");
+				const imageData = await imageToDataUrl(source.output);
 
-        outputPath = generateFilename("var");
-        await downloadImage(result.images[0].url, outputPath);
-        cost = estimateCost(lastGen.model, lastGen.resolution);
-        promptLabel = lastGen.prompt;
-      } else if (mode === "upscale") {
-        setStatus("Uploading image...");
-        const imageData = await imageToDataUrl(lastGen.output);
+				setStatus("Generating edit...");
+				const result = await generate({
+					prompt,
+					model: "gpt", // GPT supports editing
+					editImage: imageData,
+				});
 
-        setStatus("Upscaling...");
-        const result = await upscale({
-          imageUrl: imageData,
-          model: config.upscaler,
-          scaleFactor: scale,
-        });
+				outputPath = generateFilename("edit");
+				await downloadImage(result.images[0].url, outputPath);
+				cost = estimateCost("gpt");
+				promptLabel = prompt;
+			} else if (mode === "variations") {
+				setStatus("Generating variations...");
+				const result = await generate({
+					prompt: source.prompt,
+					model: source.model,
+					aspect: source.aspect,
+					resolution: source.resolution,
+					numImages: 1,
+				});
 
-        outputPath = lastGen.output.replace(".png", `-up${scale}x.png`);
-        await downloadImage(result.images[0].url, outputPath);
-        cost = 0.02;
-        promptLabel = `[upscale ${scale}x] ${lastGen.prompt}`;
-      } else {
-        // rmbg
-        setStatus("Uploading image...");
-        const imageData = await imageToDataUrl(lastGen.output);
+				outputPath = generateFilename("var");
+				await downloadImage(result.images[0].url, outputPath);
+				cost = estimateCost(source.model, source.resolution);
+				promptLabel = source.prompt;
+			} else if (mode === "upscale") {
+				setStatus("Uploading image...");
+				const imageData = await imageToDataUrl(source.output);
 
-        setStatus("Removing background...");
-        const result = await removeBackground({
-          imageUrl: imageData,
-          model: config.backgroundRemover,
-        });
+				setStatus("Upscaling...");
+				const result = await upscale({
+					imageUrl: imageData,
+					model: config.upscaler,
+					scaleFactor: scale,
+				});
 
-        outputPath = lastGen.output.replace(".png", "-nobg.png");
-        await downloadImage(result.images[0].url, outputPath);
-        cost = 0.02;
-        promptLabel = `[rmbg] ${lastGen.prompt}`;
-      }
+				outputPath = source.output.replace(
+					/\.(png|jpg|jpeg|webp)$/i,
+					`-up${scale}x.png`,
+				);
+				await downloadImage(result.images[0].url, outputPath);
+				cost = 0.02;
+				promptLabel = `[upscale ${scale}x] ${source.prompt}`;
+			} else {
+				// rmbg
+				setStatus("Uploading image...");
+				const imageData = await imageToDataUrl(source.output);
 
-      setStatus("Downloading...");
+				setStatus("Removing background...");
+				const result = await removeBackground({
+					imageUrl: imageData,
+					model: config.backgroundRemover,
+				});
 
-      const dims = await getImageDimensions(outputPath);
-      const size = await getFileSize(outputPath);
+				outputPath = source.output.replace(
+					/\.(png|jpg|jpeg|webp)$/i,
+					"-nobg.png",
+				);
+				await downloadImage(result.images[0].url, outputPath);
+				cost = 0.02;
+				promptLabel = `[rmbg] ${source.prompt}`;
+			}
 
-      await addGeneration({
-        id: generateId(),
-        prompt: promptLabel,
-        model: mode === "upscale" ? config.upscaler : mode === "rmbg" ? config.backgroundRemover : lastGen.model,
-        aspect: lastGen.aspect,
-        resolution: lastGen.resolution,
-        output: resolve(outputPath),
-        cost,
-        timestamp: new Date().toISOString(),
-        editedFrom: lastGen.output,
-      });
+			setStatus("Saving...");
 
-      setResult({
-        path: outputPath,
-        dims: dims ? `${dims.width}x${dims.height}` : "?",
-        size,
-      });
+			const dims = await getImageDimensions(outputPath);
+			const size = await getFileSize(outputPath);
 
-      if (config.openAfterGenerate) {
-        await openImage(outputPath);
-      }
+			await addGeneration({
+				id: generateId(),
+				prompt: promptLabel,
+				model:
+					mode === "upscale"
+						? config.upscaler
+						: mode === "rmbg"
+							? config.backgroundRemover
+							: source.model,
+				aspect: source.aspect,
+				resolution: source.resolution,
+				output: resolve(outputPath),
+				cost,
+				timestamp: new Date().toISOString(),
+				editedFrom: source.output,
+			});
 
-      setStep("done");
-    } catch (err) {
-      onError(err as Error);
-      onBack();
-    }
-  };
+			const fullPath = resolve(outputPath);
 
-  const getModeTitle = () => {
-    switch (mode) {
-      case "edit":
-        return "Edit Image";
-      case "variations":
-        return "Generate Variations";
-      case "upscale":
-        return "Upscale Image";
-      case "rmbg":
-        return "Remove Background";
-    }
-  };
+			setResult({
+				path: fullPath,
+				dims: dims ? `${dims.width}x${dims.height}` : "?",
+				size,
+			});
 
-  if (step === "loading" || !lastGen) {
-    return (
-      <Box>
-        <Text>Loading...</Text>
-      </Box>
-    );
-  }
+			if (config.openAfterGenerate) {
+				await openImage(fullPath);
+			}
 
-  return (
-    <Box flexDirection="column">
-      <Text bold>{getModeTitle()}</Text>
-      <Box marginTop={1} marginBottom={1}>
-        <Text dimColor>Source: {lastGen.output.split("/").pop()}</Text>
-      </Box>
+			setStep("done");
+		} catch (err) {
+			onError(err as Error);
+			onBack();
+		}
+	};
 
-      {/* Prompt input for edit mode */}
-      {step === "prompt" && (
-        <Box flexDirection="column">
-          <Text>Describe the edit:</Text>
-          <Box marginTop={1}>
-            <Text color="cyan">▸ </Text>
-            <TextInput
-              value={prompt}
-              onChange={setPrompt}
-              onSubmit={handlePromptSubmit}
-              placeholder="Change the background to a beach..."
-            />
-          </Box>
-        </Box>
-      )}
+	const source = step !== "select" ? getSourceImage() : null;
 
-      {/* Scale selection for upscale */}
-      {step === "scale" && (
-        <Box flexDirection="column">
-          <Text>Select upscale factor:</Text>
-          <Box marginTop={1}>
-            <Text color="cyan" bold>▸ {scale}x</Text>
-            <Text dimColor> (↑↓ to adjust, Enter to confirm)</Text>
-          </Box>
-        </Box>
-      )}
+	return (
+		<Box flexDirection="column">
+			<Text bold>Edit</Text>
 
-      {/* Confirmation */}
-      {step === "confirm" && (
-        <Box flexDirection="column">
-          <Text bold>Ready to process:</Text>
-          <Box marginTop={1} flexDirection="column" marginLeft={2}>
-            {mode === "edit" && (
-              <Text>Edit: <Text color="cyan">{prompt.slice(0, 40)}{prompt.length > 40 ? "..." : ""}</Text></Text>
-            )}
-            {mode === "variations" && (
-              <Text>Prompt: <Text color="cyan">{lastGen.prompt.slice(0, 40)}...</Text></Text>
-            )}
-            {mode === "upscale" && (
-              <>
-                <Text>Scale: <Text color="cyan">{scale}x</Text></Text>
-                <Text>Model: <Text color="green">{MODELS[config.upscaler]?.name}</Text></Text>
-              </>
-            )}
-            {mode === "rmbg" && (
-              <Text>Model: <Text color="green">{MODELS[config.backgroundRemover]?.name}</Text></Text>
-            )}
-          </Box>
-          <Box marginTop={1}>
-            <Text>Proceed? </Text>
-            <Text color="green" bold>[Y]es</Text>
-            <Text> / </Text>
-            <Text color="red">[N]o</Text>
-          </Box>
-        </Box>
-      )}
+			{/* Image selection step */}
+			{step === "select" && (
+				<Box flexDirection="column" marginTop={1}>
+					{!useCustomPath ? (
+						<>
+							<Text dimColor>
+								Select image (↑↓ navigate, tab for custom path)
+							</Text>
+							<Box marginTop={1} flexDirection="column">
+								{generations.slice(0, 8).map((gen, index) => {
+									const isSelected = index === selectedIndex;
+									return (
+										<Box key={gen.id} marginLeft={1}>
+											<Text
+												color={isSelected ? "magenta" : undefined}
+												bold={isSelected}
+											>
+												{isSelected ? "◆ " : "  "}
+											</Text>
+											<Box width={40}>
+												<Text color={isSelected ? "cyan" : undefined}>
+													{gen.prompt.slice(0, 32)}
+													{gen.prompt.length > 32 ? "..." : ""}
+												</Text>
+											</Box>
+											<Text dimColor>{basename(gen.output).slice(0, 20)}</Text>
+										</Box>
+									);
+								})}
+							</Box>
+							{generations.length > 8 && (
+								<Box marginTop={1} marginLeft={1}>
+									<Text dimColor>
+										+{generations.length - 8} more in gallery
+									</Text>
+								</Box>
+							)}
+						</>
+					) : (
+						<>
+							<Text dimColor>
+								Enter path or drag file
+								{generations.length > 0 ? " (tab for history)" : ""}
+							</Text>
+							<Box marginTop={1}>
+								<Text color="magenta">◆ </Text>
+								<TextInput
+									value={customPath}
+									onChange={setCustomPath}
+									onSubmit={proceedFromSelect}
+									placeholder="/path/to/image.png"
+								/>
+							</Box>
+						</>
+					)}
+				</Box>
+			)}
 
-      {/* Processing */}
-      {step === "processing" && (
-        <Box>
-          <Text color="yellow">⠋ {status}</Text>
-        </Box>
-      )}
+			{/* Operation selection step */}
+			{step === "operation" && source && (
+				<Box flexDirection="column" marginTop={1}>
+					<Text dimColor>Source: {basename(source.output)}</Text>
+					<Box marginTop={1} flexDirection="column">
+						{OPERATIONS.map((op, index) => {
+							const isSelected = index === operationIndex;
+							return (
+								<Box key={op.key} marginLeft={1}>
+									<Text
+										color={isSelected ? "magenta" : undefined}
+										bold={isSelected}
+									>
+										{isSelected ? "◆ " : "  "}
+										{op.label.padEnd(18)}
+									</Text>
+									<Text dimColor={!isSelected}>{op.description}</Text>
+								</Box>
+							);
+						})}
+					</Box>
+				</Box>
+			)}
 
-      {/* Done */}
-      {step === "done" && result && (
-        <Box flexDirection="column">
-          <Text color="green" bold>✓ Complete!</Text>
-          <Box marginTop={1} flexDirection="column" marginLeft={2}>
-            <Text>Saved: <Text color="cyan">{result.path}</Text></Text>
-            <Text dimColor>({result.dims}, {result.size})</Text>
-          </Box>
-          <Box marginTop={1}>
-            <Text dimColor>Press Enter to continue...</Text>
-          </Box>
-        </Box>
-      )}
-    </Box>
-  );
+			{/* Show source after operation selection */}
+			{step !== "select" && step !== "operation" && source && (
+				<Box marginTop={1} marginBottom={1}>
+					<Text dimColor>Source: {basename(source.output)}</Text>
+				</Box>
+			)}
+
+			{/* Prompt input for edit mode */}
+			{step === "prompt" && (
+				<Box flexDirection="column">
+					<Text>Describe the edit:</Text>
+					<Box marginTop={1}>
+						<Text color="magenta">◆ </Text>
+						<TextInput
+							value={prompt}
+							onChange={setPrompt}
+							onSubmit={handlePromptSubmit}
+							placeholder="Change the background to a beach..."
+						/>
+					</Box>
+				</Box>
+			)}
+
+			{/* Scale selection for upscale */}
+			{step === "scale" && (
+				<Box flexDirection="column">
+					<Text>Select upscale factor:</Text>
+					<Box marginTop={1}>
+						<Text color="magenta" bold>
+							◆ {scale}x
+						</Text>
+						<Text dimColor> (↑↓ to adjust, enter to confirm)</Text>
+					</Box>
+				</Box>
+			)}
+
+			{/* Confirmation */}
+			{step === "confirm" && source && mode && (
+				<Box flexDirection="column">
+					<Text bold>Ready to process:</Text>
+					<Box marginTop={1} flexDirection="column" marginLeft={2}>
+						{mode === "edit" && (
+							<Text>
+								Edit:{" "}
+								<Text color="cyan">
+									{prompt.slice(0, 40)}
+									{prompt.length > 40 ? "..." : ""}
+								</Text>
+							</Text>
+						)}
+						{mode === "variations" && (
+							<Text>
+								Prompt:{" "}
+								<Text color="cyan">{source.prompt.slice(0, 40)}...</Text>
+							</Text>
+						)}
+						{mode === "upscale" && (
+							<>
+								<Text>
+									Scale: <Text color="cyan">{scale}x</Text>
+								</Text>
+								<Text>
+									Model:{" "}
+									<Text color="green">{MODELS[config.upscaler]?.name}</Text>
+								</Text>
+							</>
+						)}
+						{mode === "rmbg" && (
+							<Text>
+								Model:{" "}
+								<Text color="green">
+									{MODELS[config.backgroundRemover]?.name}
+								</Text>
+							</Text>
+						)}
+					</Box>
+					<Box marginTop={1}>
+						<Text>Proceed? </Text>
+						<Text color="green" bold>
+							[Y]es
+						</Text>
+						<Text> / </Text>
+						<Text color="red">[N]o</Text>
+					</Box>
+				</Box>
+			)}
+
+			{/* Processing */}
+			{step === "processing" && (
+				<Box>
+					<Spinner text={status} />
+				</Box>
+			)}
+
+			{/* Done */}
+			{step === "done" && result && (
+				<Box flexDirection="column">
+					<Text color="green" bold>
+						◆ Complete
+					</Text>
+					<Box marginTop={1} flexDirection="column" marginLeft={2}>
+						<Text>
+							Saved: <Text color="cyan">{result.path}</Text>
+						</Text>
+						<Text dimColor>
+							{result.dims} · {result.size}
+						</Text>
+					</Box>
+					<Box marginTop={1}>
+						<Text dimColor>enter to continue</Text>
+					</Box>
+				</Box>
+			)}
+		</Box>
+	);
 }
