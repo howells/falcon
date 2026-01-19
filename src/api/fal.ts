@@ -171,6 +171,11 @@ export async function upscale(options: UpscaleOptions): Promise<FalResponse> {
 		throw new Error((data as FalError).detail);
 	}
 
+	// Normalize response - upscale APIs return { image: {...} } not { images: [...] }
+	if ("image" in data && !("images" in data)) {
+		return { images: [data.image] } as FalResponse;
+	}
+
 	return data as FalResponse;
 }
 
@@ -197,6 +202,11 @@ export async function removeBackground(
 
 	if ("detail" in data) {
 		throw new Error((data as FalError).detail);
+	}
+
+	// Normalize response - rmbg APIs return { image: {...} } not { images: [...] }
+	if ("image" in data && !("images" in data)) {
+		return { images: [data.image] } as FalResponse;
 	}
 
 	return data as FalResponse;
