@@ -1,7 +1,8 @@
 import { Command } from "commander";
 import chalk from "chalk";
 import ora from "ora";
-import { resolve } from "path";
+import { resolve, isAbsolute, normalize, relative } from "path";
+import { existsSync } from "fs";
 
 import { generate, upscale, removeBackground } from "./api/fal";
 import {
@@ -21,6 +22,7 @@ import {
   openImage,
   getImageDimensions,
   getFileSize,
+  deleteTempFile,
 } from "./utils/image";
 import {
   loadConfig,
@@ -32,6 +34,49 @@ import {
   type Generation,
 } from "./utils/config";
 
+/**
+ * Get error message safely from unknown error type
+ */
+function getErrorMessage(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  if (typeof err === "string") return err;
+  return "Unknown error";
+}
+
+/**
+ * Validate output path is safe (no path traversal, within cwd)
+ */
+function validateOutputPath(outputPath: string): string {
+  const resolved = resolve(outputPath);
+  const cwd = process.cwd();
+
+  // Ensure path stays within current working directory
+  const rel = relative(cwd, resolved);
+  if (rel.startsWith("..") || isAbsolute(rel)) {
+    throw new Error(`Output path must be within current directory: ${outputPath}`);
+  }
+
+  return resolved;
+}
+
+/**
+ * Validate edit path exists and is a valid image
+ */
+function validateEditPath(editPath: string): string {
+  const resolved = resolve(editPath);
+
+  if (!existsSync(resolved)) {
+    throw new Error(`Edit image not found: ${editPath}`);
+  }
+
+  const ext = resolved.toLowerCase();
+  if (!ext.endsWith(".png") && !ext.endsWith(".jpg") && !ext.endsWith(".jpeg") && !ext.endsWith(".webp")) {
+    throw new Error(`Edit image must be PNG, JPG, or WebP: ${editPath}`);
+  }
+
+  return resolved;
+}
+
 interface CliOptions {
   model?: string;
   edit?: string;
@@ -39,10 +84,23 @@ interface CliOptions {
   resolution?: string;
   output?: string;
   num?: string;
+  // Format presets
   cover?: boolean;
   square?: boolean;
   landscape?: boolean;
   portrait?: boolean;
+  // Social media presets
+  story?: boolean;
+  reel?: boolean;
+  feed?: boolean;
+  og?: boolean;
+  // Device presets
+  wallpaper?: boolean;
+  // Cinematic presets
+  wide?: boolean;
+  ultra?: boolean;
+  // Output options
+  transparent?: boolean;
   last?: boolean;
   vary?: boolean;
   up?: boolean;
@@ -55,7 +113,7 @@ export async function runCli(args: string[]): Promise<void> {
   const config = await loadConfig();
 
   const program = new Command()
-    .name("falky")
+    .name("falcon")
     .description("fal.ai image generation CLI")
     .version("1.0.0")
     .argument("[prompt]", "Image generation prompt")
@@ -65,10 +123,23 @@ export async function runCli(args: string[]): Promise<void> {
     .option("-r, --resolution <res>", `Resolution (${RESOLUTIONS.join(", ")})`)
     .option("-o, --output <file>", "Output filename")
     .option("-n, --num <count>", "Number of images 1-4")
-    .option("--cover", "Book cover preset: 9:16, 2K")
-    .option("--square", "Square preset: 1:1")
-    .option("--landscape", "Landscape preset: 16:9")
-    .option("--portrait", "Portrait preset: 2:3")
+    // Format presets
+    .option("--cover", "Kindle/eBook cover: 2:3, 2K (1600×2400)")
+    .option("--square", "Square: 1:1")
+    .option("--landscape", "Landscape: 16:9")
+    .option("--portrait", "Portrait: 2:3")
+    // Social media presets
+    .option("--story", "Instagram/TikTok Story: 9:16 (1080×1920)")
+    .option("--reel", "Instagram Reel: 9:16 (1080×1920)")
+    .option("--feed", "Instagram Feed portrait: 4:5 (1080×1350)")
+    .option("--og", "Open Graph / social share: 16:9 (1200×630)")
+    // Device presets
+    .option("--wallpaper", "iPhone wallpaper: 9:16")
+    // Cinematic presets
+    .option("--wide", "Cinematic wide: 21:9")
+    .option("--ultra", "Ultra-wide banner: 21:9, 2K")
+    // Output options
+    .option("--transparent", "Transparent background (PNG, GPT model only)")
     .option("--last", "Show last generation info")
     .option("--vary", "Generate variations of last image")
     .option("--up", "Upscale last image")
@@ -93,7 +164,7 @@ export async function runCli(args: string[]): Promise<void> {
     try {
       getApiKey(config);
     } catch (err) {
-      console.error(chalk.red((err as Error).message));
+      console.error(chalk.red(getErrorMessage(err)));
       process.exit(1);
     }
   }
@@ -152,9 +223,31 @@ async function generateImage(
   let aspect: AspectRatio = (options.aspect as AspectRatio) || config.defaultAspect;
   let resolution: Resolution = (options.resolution as Resolution) || config.defaultResolution;
 
+  // Apply presets (in priority order)
   if (options.cover) {
+    // Kindle/eBook cover: 1600×2560 recommended, 2:3 is closest (1600×2400)
+    aspect = "2:3";
+    resolution = "2K";
+  } else if (options.story || options.reel) {
+    // Instagram Story/Reel: 1080×1920 (9:16)
+    aspect = "9:16";
+  } else if (options.feed) {
+    // Instagram Feed portrait: 1080×1350 (4:5)
+    aspect = "4:5";
+  } else if (options.og) {
+    // Open Graph social share: 1200×630 (~1.91:1), 16:9 is closest
+    aspect = "16:9";
+  } else if (options.wallpaper) {
+    // iPhone wallpaper: 9:16 works for most models
     aspect = "9:16";
     resolution = "2K";
+  } else if (options.ultra) {
+    // Ultra-wide banner: 21:9, high res
+    aspect = "21:9";
+    resolution = "2K";
+  } else if (options.wide) {
+    // Cinematic wide: 21:9
+    aspect = "21:9";
   } else if (options.square) {
     aspect = "1:1";
   } else if (options.landscape) {
@@ -165,7 +258,15 @@ async function generateImage(
 
   const model = options.model || config.defaultModel;
   const numImages = Math.min(4, Math.max(1, parseInt(options.num || "1", 10)));
-  const outputPath = options.output || generateFilename();
+
+  // Validate output path if specified
+  let outputPath: string;
+  try {
+    outputPath = options.output ? validateOutputPath(options.output) : generateFilename();
+  } catch (err) {
+    console.error(chalk.red(getErrorMessage(err)));
+    process.exit(1);
+  }
 
   const modelConfig = MODELS[model];
   if (!modelConfig) {
@@ -184,15 +285,22 @@ async function generateImage(
 
   // Handle edit mode
   let editImageData: string | undefined;
+  let editPath: string | undefined;
   if (options.edit) {
-    const editPath = resolve(options.edit);
+    try {
+      editPath = validateEditPath(options.edit);
+    } catch (err) {
+      console.error(chalk.red(getErrorMessage(err)));
+      process.exit(1);
+    }
     console.log(`Editing: ${chalk.dim(editPath)}`);
 
     const resized = await resizeImage(editPath, 1024);
     editImageData = await imageToDataUrl(resized);
 
+    // Clean up temp file using safe utility
     if (resized !== editPath) {
-      await Bun.spawn(["rm", resized]).exited;
+      deleteTempFile(resized);
     }
   }
 
@@ -206,6 +314,7 @@ async function generateImage(
       resolution,
       numImages,
       editImage: editImageData,
+      transparent: options.transparent,
     });
 
     spinner.succeed("Generated!");
@@ -252,7 +361,7 @@ async function generateImage(
     );
   } catch (err) {
     spinner.fail("Generation failed");
-    console.error(chalk.red((err as Error).message));
+    console.error(chalk.red(getErrorMessage(err)));
     process.exit(1);
   }
 }
@@ -344,7 +453,7 @@ async function upscaleLast(
     }
   } catch (err) {
     spinner.fail("Upscale failed");
-    console.error(chalk.red((err as Error).message));
+    console.error(chalk.red(getErrorMessage(err)));
     process.exit(1);
   }
 }
@@ -404,42 +513,66 @@ async function removeBackgroundLast(
     }
   } catch (err) {
     spinner.fail("Background removal failed");
-    console.error(chalk.red((err as Error).message));
+    console.error(chalk.red(getErrorMessage(err)));
     process.exit(1);
   }
 }
 
 export function showHelp(): void {
   console.log(`
-${chalk.bold("falky")} - fal.ai image generation CLI
+${chalk.bold("falcon")} - fal.ai image generation CLI
 
 ${chalk.bold("Usage:")}
-  falky                           Launch interactive studio
-  falky "prompt" [options]        Generate image from prompt
-  falky --last                    Show last generation
-  falky --vary                    Generate variations of last image
-  falky --edit "prompt"           Edit last image
-  falky --up                      Upscale last image
-  falky --rmbg                    Remove background from last
+  falcon                           Launch interactive studio
+  falcon "prompt" [options]        Generate image from prompt
+  falcon --last                    Show last generation info
+  falcon --vary                    Generate variations of last image
+  falcon --up                      Upscale last image
+  falcon --rmbg                    Remove background from last image
 
 ${chalk.bold("Options:")}
   -m, --model <model>      Model: gpt, banana, gemini, gemini3
-  -e, --edit <file>        Edit an existing image
-  -a, --aspect <ratio>     Aspect: 21:9, 16:9, 3:2, 4:3, 5:4, 1:1, 4:5, 3:4, 2:3, 9:16
+  -e, --edit <file>        Edit an existing image with prompt
+  -a, --aspect <ratio>     Aspect ratio (see below)
   -r, --resolution <res>   Resolution: 1K, 2K, 4K
   -o, --output <file>      Output filename
-  -n, --num <count>        Number of images 1-4
+  -n, --num <count>        Number of images (1-4)
+  --transparent            Transparent background PNG (GPT only)
+  --no-open                Don't auto-open image after generation
+
+${chalk.bold("Post-processing:")}
+  --last                   Show last generation info
+  --vary                   Generate variations of last image
+  --up                     Upscale last image
+  --rmbg                   Remove background from last image
+  --scale <factor>         Upscale factor: 2, 4, 6, 8 (with --up)
 
 ${chalk.bold("Presets:")}
-  --cover                  Book cover: 9:16, 2K
+  ${chalk.dim("Format:")}
+  --cover                  Kindle/eBook cover: 2:3, 2K
   --square                 Square: 1:1
   --landscape              Landscape: 16:9
   --portrait               Portrait: 2:3
+  ${chalk.dim("Social Media:")}
+  --story                  Instagram/TikTok Story: 9:16
+  --reel                   Instagram Reel: 9:16
+  --feed                   Instagram Feed: 4:5
+  --og                     Open Graph / social share: 16:9
+  ${chalk.dim("Devices:")}
+  --wallpaper              iPhone wallpaper: 9:16, 2K
+  ${chalk.dim("Cinematic:")}
+  --wide                   Cinematic wide: 21:9
+  --ultra                  Ultra-wide banner: 21:9, 2K
+
+${chalk.bold("Aspect Ratios:")}
+  21:9, 16:9, 3:2, 4:3, 5:4, 1:1, 4:5, 3:4, 2:3, 9:16
 
 ${chalk.bold("Examples:")}
-  falky "a cat on a windowsill" -m gpt
-  falky "urban dusk" -m banana --cover -r 4K
-  falky --vary -n 4
-  falky --up --scale 4
+  falcon "a cat on a windowsill" -m gpt
+  falcon "urban landscape" --landscape -r 4K
+  falcon "add rain" -e photo.png
+  falcon --vary -n 4
+  falcon --up --scale 4
+  falcon --rmbg
 `);
 }

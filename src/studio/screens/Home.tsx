@@ -26,6 +26,11 @@ interface HomeScreenProps {
   onNavigate: (screen: Screen) => void;
 }
 
+// Falcon head silhouette
+const FALCON_LOGO = `  ▄▀▀▄
+  █▀▀▀▶
+  ▀▄▄▀`;
+
 export function HomeScreen({ history, onNavigate }: HomeScreenProps) {
   const [selectedIndex, setSelectedIndex] = useState(0);
   const hasLast = history.generations.length > 0;
@@ -49,6 +54,10 @@ export function HomeScreen({ history, onNavigate }: HomeScreenProps) {
 
   return (
     <Box flexDirection="column">
+      <Box marginBottom={1}>
+        <Text color="magenta">{FALCON_LOGO}</Text>
+      </Box>
+
       {MENU_ITEMS.map((item, index) => {
         const isSelected = index === selectedIndex;
         const isDisabled = item.requiresLast && !hasLast;

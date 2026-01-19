@@ -9,6 +9,7 @@ export interface GenerateOptions {
   resolution?: Resolution;
   numImages?: number;
   editImage?: string; // base64 data URL for edit mode
+  transparent?: boolean; // Generate with transparent background (GPT model only)
 }
 
 export interface UpscaleOptions {
@@ -54,11 +55,11 @@ function getApiKey(): string {
   const envKey = process.env.FAL_KEY;
   if (envKey) return envKey;
 
-  throw new Error("FAL_KEY not found. Set FAL_KEY environment variable or configure in ~/.falky/config.json");
+  throw new Error("FAL_KEY not found. Set FAL_KEY environment variable or configure in ~/.falcon/config.json");
 }
 
 export async function generate(options: GenerateOptions): Promise<FalResponse> {
-  const { prompt, model, aspect = "9:16", resolution = "2K", numImages = 1, editImage } = options;
+  const { prompt, model, aspect = "9:16", resolution = "2K", numImages = 1, editImage, transparent } = options;
 
   const config = MODELS[model];
   if (!config) {
@@ -73,6 +74,11 @@ export async function generate(options: GenerateOptions): Promise<FalResponse> {
   if (model === "gpt") {
     body.image_size = aspectToGptSize(aspect);
     body.quality = "high";
+    // Transparency support for GPT model
+    if (transparent) {
+      body.background = "transparent";
+      body.output_format = "png";
+    }
   } else {
     if (config.supportsAspect) {
       body.aspect_ratio = aspect;

@@ -18,13 +18,13 @@ import {
   getImageDimensions,
   getFileSize,
 } from "../../utils/image";
-import { addGeneration, generateId, type FalkyConfig } from "../../utils/config";
+import { addGeneration, generateId, type FalconConfig } from "../../utils/config";
 import { resolve } from "path";
 
 type Step = "prompt" | "model" | "aspect" | "resolution" | "confirm" | "generating" | "done";
 
 interface GenerateScreenProps {
-  config: FalkyConfig;
+  config: FalconConfig;
   onBack: () => void;
   onComplete: () => void;
   onError: (err: Error) => void;

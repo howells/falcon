@@ -3,7 +3,7 @@ import { render } from "ink";
 import React from "react";
 import { runCli } from "./cli";
 import { App } from "./studio/App";
-import { loadConfig, loadHistory, saveConfig, getApiKey, type FalkyConfig, type History } from "./utils/config";
+import { loadConfig, loadHistory, saveConfig, getApiKey, type FalconConfig, type History } from "./utils/config";
 import { setApiKey } from "./api/fal";
 
 async function main() {
@@ -20,7 +20,7 @@ async function main() {
 
   // If there are arguments (prompt or flags), run CLI mode
   if (args.length > 0) {
-    await runCli(["node", "falky", ...args]);
+    await runCli(["node", "falcon", ...args]);
     return;
   }
 
@@ -32,7 +32,7 @@ async function launchStudio() {
   let config = await loadConfig();
   let history = await loadHistory();
 
-  const handleConfigChange = async (newConfig: Partial<FalkyConfig>) => {
+  const handleConfigChange = async (newConfig: Partial<FalconConfig>) => {
     await saveConfig(newConfig);
     config = { ...config, ...newConfig };
   };

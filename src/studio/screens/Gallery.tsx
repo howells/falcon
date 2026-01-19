@@ -14,7 +14,8 @@ export function GalleryScreen({ history, onBack }: GalleryScreenProps) {
   const [page, setPage] = useState(0);
   const pageSize = 8;
 
-  const generations = history.generations;
+  // Reverse to display newest-first (storage is oldest-first for O(1) push)
+  const generations = [...history.generations].reverse();
   const totalPages = Math.ceil(generations.length / pageSize);
   const pageItems = generations.slice(page * pageSize, (page + 1) * pageSize);
 
@@ -54,7 +55,11 @@ export function GalleryScreen({ history, onBack }: GalleryScreenProps) {
 
     if (key.return && pageItems[selectedIndex]) {
       // Open the selected image
-      await openImage(pageItems[selectedIndex].output);
+      try {
+        await openImage(pageItems[selectedIndex].output);
+      } catch {
+        // Image may have been deleted; silently ignore
+      }
     }
   });
 

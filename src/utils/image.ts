@@ -1,5 +1,6 @@
-import { existsSync } from "fs";
+import { existsSync, unlinkSync } from "fs";
 import { basename, extname } from "path";
+import { randomUUID } from "crypto";
 
 /**
  * Download an image from a URL and save it to a file
@@ -37,7 +38,8 @@ export async function imageToDataUrl(imagePath: string): Promise<string> {
  * Returns the path to the resized image (temp file if resized)
  */
 export async function resizeImage(imagePath: string, maxSize: number = 1024): Promise<string> {
-  const tempPath = `/tmp/falky-resize-${Date.now()}.png`;
+  // Use cryptographically random UUID for temp file to prevent race conditions
+  const tempPath = `/tmp/falcon-resize-${randomUUID()}.png`;
 
   // Try sips first (macOS)
   try {
@@ -106,12 +108,39 @@ export function generateFilename(prefix: string = "fal"): string {
 }
 
 /**
- * Open an image in the default viewer (macOS)
+ * Open an image in the default viewer
+ * Uses the system `open` command which is safe from injection attacks
  */
 export async function openImage(imagePath: string): Promise<void> {
+  // Validate the path exists to provide better error messages
+  if (!existsSync(imagePath)) {
+    throw new Error(`Image not found: ${imagePath}`);
+  }
+
   if (process.platform === "darwin") {
-    Bun.spawn(["open", imagePath], { stdout: "ignore", stderr: "ignore" });
+    // Use 'open' command with -a flag for Preview
+    // Arguments are passed as array, preventing command injection
+    Bun.spawn(["open", "-a", "Preview", imagePath], {
+      stdout: "ignore",
+      stderr: "ignore"
+    });
   } else if (process.platform === "linux") {
-    Bun.spawn(["xdg-open", imagePath], { stdout: "ignore", stderr: "ignore" });
+    Bun.spawn(["xdg-open", imagePath], {
+      stdout: "ignore",
+      stderr: "ignore"
+    });
+  }
+}
+
+/**
+ * Delete a temporary file safely
+ */
+export function deleteTempFile(filePath: string): void {
+  try {
+    if (filePath.startsWith("/tmp/falcon-") && existsSync(filePath)) {
+      unlinkSync(filePath);
+    }
+  } catch {
+    // Ignore cleanup errors
   }
 }

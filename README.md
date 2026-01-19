@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="logo.svg" width="64" height="64" alt="Falky">
+  <img src="logo.png" width="128" height="128" alt="Falcon">
 </p>
 
-<h1 align="center">Falky</h1>
+<h1 align="center">Falcon</h1>
 
 <p align="center">
   CLI for generating images with <a href="https://fal.ai">fal.ai</a>
@@ -17,7 +17,7 @@ Supports multiple models, batch generation, upscaling, and background removal.
 ### Quick Install (Recommended)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/howells/falky/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/howells/falcon/main/install.sh | bash
 ```
 
 ### Manual Install
@@ -25,8 +25,8 @@ curl -fsSL https://raw.githubusercontent.com/howells/falky/main/install.sh | bas
 Requires [Bun](https://bun.sh) runtime.
 
 ```bash
-git clone https://github.com/howells/falky.git
-cd falky
+git clone https://github.com/howells/falcon.git
+cd falcon
 bun install
 bun link
 ```
@@ -39,7 +39,7 @@ Set your fal.ai API key:
 export FAL_KEY="your-api-key"
 ```
 
-Or add it to `~/.falky/config.json`:
+Or add it to `~/.falcon/config.json`:
 
 ```json
 {
@@ -61,7 +61,7 @@ Get your API key at [fal.ai/dashboard/keys](https://fal.ai/dashboard/keys).
 | `upscaler` | `clarity` | Upscaler model (`clarity` or `crystal`) |
 | `backgroundRemover` | `rmbg` | Background removal model (`rmbg` or `bria`) |
 
-You can also create a `.falkyrc` file in any directory to override settings per-project.
+You can also create a `.falconrc` file in any directory to override settings per-project.
 
 ## Usage
 
@@ -69,55 +69,64 @@ You can also create a `.falkyrc` file in any directory to override settings per-
 
 ```bash
 # Basic generation
-falky "a cat sitting on a windowsill at sunset"
+falcon "a cat sitting on a windowsill at sunset"
 
 # Specify model
-falky "cyberpunk cityscape" -m banana
+falcon "cyberpunk cityscape" -m banana
 
 # Set aspect ratio and resolution
-falky "mountain landscape" -a 16:9 -r 4K
+falcon "mountain landscape" -a 16:9 -r 4K
 
 # Generate multiple images
-falky "abstract art" -n 4
+falcon "abstract art" -n 4
 
 # Use presets
-falky "book cover design" --cover      # 9:16, 2K
-falky "profile picture" --square       # 1:1
-falky "desktop wallpaper" --landscape  # 16:9
-falky "phone wallpaper" --portrait     # 2:3
+falcon "book cover design" --cover      # Kindle: 2:3, 2K
+falcon "profile picture" --square       # 1:1
+falcon "desktop wallpaper" --landscape  # 16:9
+falcon "phone wallpaper" --portrait     # 2:3
+
+# Social media presets
+falcon "instagram story" --story        # 9:16 (1080×1920)
+falcon "insta reel cover" --reel        # 9:16
+falcon "feed post" --feed               # 4:5 (1080×1350)
+falcon "blog preview" --og              # Open Graph: 16:9
+
+# Transparent images (GPT model only)
+falcon "logo on transparent background" --transparent -m gpt
 ```
 
 ### Edit Images
 
 ```bash
 # Edit an existing image with a prompt
-falky "add a rainbow in the sky" -e ./photo.png
+falcon "add a rainbow in the sky" -e ./photo.png
 ```
 
 ### Post-Processing
 
 ```bash
 # Show last generation info
-falky --last
+falcon --last
 
 # Generate variations of last image
-falky --vary
-falky --vary -n 4  # 4 variations
+falcon --vary
+falcon --vary -n 4  # 4 variations
 
 # Upscale last image
-falky --up
-falky --up --scale 4  # 4x upscale
+falcon --up
+falcon --up --scale 4  # 4x upscale
 
 # Remove background from last image
-falky --rmbg
+falcon --rmbg
 ```
 
 ### Interactive Studio
 
-Run `falky` without arguments to launch the interactive terminal UI:
+Run `falcon` without arguments to launch the interactive terminal UI:
 
 ```bash
-falky
+falcon
 ```
 
 ## Models
@@ -145,29 +154,44 @@ All models support image editing with the `-e` flag.
 ## Options Reference
 
 ```
-Usage: falky [prompt] [options]
+Usage: falcon [prompt] [options]
 
 Options:
   -m, --model <model>      Model: gpt, banana, gemini, gemini3
-  -e, --edit <file>        Edit an existing image
+  -e, --edit <file>        Edit an existing image with prompt
   -a, --aspect <ratio>     Aspect ratio (see below)
   -r, --resolution <res>   Resolution: 1K, 2K, 4K
   -o, --output <file>      Output filename
   -n, --num <count>        Number of images (1-4)
-  --no-open                Don't auto-open after generation
-
-Presets:
-  --cover                  Book cover: 9:16, 2K
-  --square                 Square: 1:1
-  --landscape              Landscape: 16:9
-  --portrait               Portrait: 2:3
+  --transparent            Transparent PNG (GPT model only)
+  --no-open                Don't auto-open image after generation
 
 Post-processing:
   --last                   Show last generation info
   --vary                   Generate variations of last image
   --up                     Upscale last image
   --rmbg                   Remove background from last image
-  --scale <factor>         Upscale factor (with --up)
+  --scale <factor>         Upscale factor: 2, 4, 6, 8 (with --up)
+
+Presets:
+  Format:
+    --cover                Kindle/eBook cover: 2:3, 2K
+    --square               Square: 1:1
+    --landscape            Landscape: 16:9
+    --portrait             Portrait: 2:3
+
+  Social Media:
+    --story                Instagram/TikTok Story: 9:16
+    --reel                 Instagram Reel: 9:16
+    --feed                 Instagram Feed: 4:5
+    --og                   Open Graph / social share: 16:9
+
+  Devices:
+    --wallpaper            iPhone wallpaper: 9:16, 2K
+
+  Cinematic:
+    --wide                 Cinematic wide: 21:9
+    --ultra                Ultra-wide banner: 21:9, 2K
 ```
 
 ### Aspect Ratios
@@ -176,13 +200,13 @@ Post-processing:
 
 ## Cost Tracking
 
-Falky tracks your spending automatically:
+Falcon tracks your spending automatically:
 
 ```
 Session: $0.52 | Today: $1.24
 ```
 
-View your history in `~/.falky/history.json`.
+View your history in `~/.falcon/history.json`.
 
 ## License
 

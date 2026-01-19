@@ -1,10 +1,10 @@
 {
-  "name": "falky",
+  "name": "falcon",
   "version": "1.0.0",
   "description": "fal.ai image generation CLI with interactive studio mode",
   "type": "module",
   "bin": {
-    "falky": "./bin/falky"
+    "falcon": "./bin/falcon"
   },
   "scripts": {
     "dev": "bun run src/index.ts",

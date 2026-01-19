@@ -16,7 +16,7 @@ import {
   addGeneration,
   generateId,
   getLastGeneration,
-  type FalkyConfig,
+  type FalconConfig,
   type Generation,
 } from "../../utils/config";
 import { resolve } from "path";
@@ -25,7 +25,7 @@ type Mode = "edit" | "variations" | "upscale" | "rmbg";
 type Step = "loading" | "prompt" | "scale" | "confirm" | "processing" | "done";
 
 interface EditScreenProps {
-  config: FalkyConfig;
+  config: FalconConfig;
   mode: Mode;
   onBack: () => void;
   onComplete: () => void;

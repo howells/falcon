@@ -9,10 +9,10 @@ import {
   type AspectRatio,
   type Resolution,
 } from "../../api/models";
-import type { FalkyConfig } from "../../utils/config";
+import type { FalconConfig } from "../../utils/config";
 
 interface SettingItem {
-  key: keyof FalkyConfig;
+  key: keyof FalconConfig;
   label: string;
   type: "select" | "toggle" | "text";
   options?: readonly string[];
@@ -29,8 +29,8 @@ const SETTINGS: SettingItem[] = [
 ];
 
 interface SettingsScreenProps {
-  config: FalkyConfig;
-  onSave: (config: Partial<FalkyConfig>) => Promise<void>;
+  config: FalconConfig;
+  onSave: (config: Partial<FalconConfig>) => Promise<void>;
   onBack: () => void;
 }
 
@@ -38,7 +38,7 @@ export function SettingsScreen({ config, onSave, onBack }: SettingsScreenProps) 
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [editing, setEditing] = useState(false);
   const [editValue, setEditValue] = useState("");
-  const [localConfig, setLocalConfig] = useState<FalkyConfig>({ ...config });
+  const [localConfig, setLocalConfig] = useState<FalconConfig>({ ...config });
 
   const currentSetting = SETTINGS[selectedIndex];
 

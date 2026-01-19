@@ -5,14 +5,14 @@ import { GenerateScreen } from "./screens/Generate";
 import { GalleryScreen } from "./screens/Gallery";
 import { SettingsScreen } from "./screens/Settings";
 import { EditScreen } from "./screens/Edit";
-import type { FalkyConfig, History } from "../utils/config";
+import type { FalconConfig, History } from "../utils/config";
 
 export type Screen = "home" | "generate" | "gallery" | "settings" | "edit" | "upscale" | "rmbg" | "variations";
 
 interface AppProps {
-  config: FalkyConfig;
+  config: FalconConfig;
   history: History;
-  onConfigChange: (config: Partial<FalkyConfig>) => Promise<void>;
+  onConfigChange: (config: Partial<FalconConfig>) => Promise<void>;
   onHistoryChange: () => Promise<void>;
 }
 
@@ -135,7 +135,7 @@ export function App({ config, history, onConfigChange, onHistoryChange }: AppPro
     <Box flexDirection="column" padding={1}>
       <Box marginBottom={1}>
         <Text bold color="cyan">
-          {" "}falky studio{" "}
+          {" "}falcon{" "}
         </Text>
         <Text dimColor>
           {screen === "home" ? "↑↓ Navigate  Enter: Select  q: Quit" : "Esc: Back  q: Quit"}
