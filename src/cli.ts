@@ -155,7 +155,7 @@ export async function runCli(args: string[]): Promise<void> {
 		.option("--transparent", "Transparent background (PNG, GPT model only)")
 		.option("--last", "Show last generation info")
 		.option("--vary", "Generate variations of last image")
-		.option("--up", "Upscale last image")
+		.option("--up", "Upscale image (provide path, or uses last)")
 		.option("--rmbg", "Remove background from last image")
 		.option("--scale <factor>", "Upscale factor (for --up)")
 		.option("--no-open", "Don't open image after generation");
@@ -189,9 +189,9 @@ export async function runCli(args: string[]): Promise<void> {
 		return;
 	}
 
-	// Handle --up (upscale last image)
+	// Handle --up (upscale image - provided path or last)
 	if (options.up) {
-		await upscaleLast(options, config);
+		await upscaleLast(prompt, options, config);
 		return;
 	}
 
@@ -434,28 +434,49 @@ async function generateVariations(
 }
 
 async function upscaleLast(
+	imagePath: string | undefined,
 	options: CliOptions,
 	config: Awaited<ReturnType<typeof loadConfig>>,
 ): Promise<void> {
-	const last = await getLastGeneration();
-	if (!last) {
-		console.error(chalk.red("No previous generation to upscale"));
-		process.exit(1);
+	let sourceImagePath: string;
+	let sourcePrompt = "[upscale]";
+	let sourceAspect: AspectRatio = "1:1";
+	let sourceResolution: Resolution = "1K";
+
+	if (imagePath) {
+		// User provided an image path - validate and use it
+		try {
+			sourceImagePath = validateEditPath(imagePath);
+		} catch (err) {
+			console.error(chalk.red(getErrorMessage(err)));
+			process.exit(1);
+		}
+	} else {
+		// Fall back to last generation
+		const last = await getLastGeneration();
+		if (!last) {
+			console.error(chalk.red("No previous generation to upscale"));
+			process.exit(1);
+		}
+		sourceImagePath = last.output;
+		sourcePrompt = last.prompt;
+		sourceAspect = last.aspect;
+		sourceResolution = last.resolution;
 	}
 
 	const scaleFactor = parseInt(options.scale || "2", 10);
 	const outputPath =
-		options.output || last.output.replace(".png", `-up${scaleFactor}x.png`);
+		options.output || sourceImagePath.replace(/\.(png|jpg|jpeg|webp)$/i, `-up${scaleFactor}x.png`);
 
 	console.log(chalk.bold("\nUpscaling..."));
-	console.log(`Source: ${chalk.dim(last.output)}`);
+	console.log(`Source: ${chalk.dim(sourceImagePath)}`);
 	console.log(`Scale: ${scaleFactor}x | Model: ${config.upscaler}`);
 
 	const spinner = ora("Upscaling...").start();
 
 	try {
 		// Convert local file to data URL for upload
-		const imageData = await imageToDataUrl(last.output);
+		const imageData = await imageToDataUrl(sourceImagePath);
 
 		const result = await upscale({
 			imageUrl: imageData,
@@ -478,14 +499,14 @@ async function upscaleLast(
 		// Record as generation
 		await addGeneration({
 			id: generateId(),
-			prompt: `[upscale ${scaleFactor}x] ${last.prompt}`,
+			prompt: `[upscale ${scaleFactor}x] ${sourcePrompt}`,
 			model: config.upscaler,
-			aspect: last.aspect,
-			resolution: last.resolution,
+			aspect: sourceAspect,
+			resolution: sourceResolution,
 			output: resolve(outputPath),
 			cost: 0.02,
 			timestamp: new Date().toISOString(),
-			editedFrom: last.output,
+			editedFrom: sourceImagePath,
 		});
 
 		if (config.openAfterGenerate && !options.noOpen) {
