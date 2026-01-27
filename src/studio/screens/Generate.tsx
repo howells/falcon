@@ -36,6 +36,8 @@ type Step =
 	| "generating"
 	| "done";
 
+type ConfirmField = "model" | "aspect" | "resolution";
+
 interface Preset {
 	key: string;
 	label: string;
@@ -124,6 +126,8 @@ export function GenerateScreen({
 		config.defaultResolution,
 	);
 	const [selectedIndex, setSelectedIndex] = useState(0);
+	const [confirmField, setConfirmField] = useState<ConfirmField | null>(null);
+	const [confirmIndex, setConfirmIndex] = useState(0);
 	const [status, setStatus] = useState("");
 	const [result, setResult] = useState<{
 		path: string;
@@ -137,6 +141,11 @@ export function GenerateScreen({
 	useInput((input, key) => {
 		if (key.escape) {
 			if (step === "generating") return;
+			if (step === "confirm" && confirmField) {
+				setConfirmField(null);
+				setSelectedIndex(0);
+				return;
+			}
 			if (step === "prompt") {
 				onBack();
 			} else if (step === "done") {
@@ -144,6 +153,9 @@ export function GenerateScreen({
 			} else if (step === "preset") {
 				setStep("prompt");
 			} else if (step === "model") {
+				setStep("preset");
+				setSelectedIndex(0);
+			} else if (step === "confirm") {
 				setStep("preset");
 				setSelectedIndex(0);
 			} else {
@@ -178,6 +190,8 @@ export function GenerateScreen({
 					setResolution(preset.resolution);
 				}
 				setSelectedIndex(0);
+				setConfirmIndex(0);
+				setConfirmField(null);
 				setStep("confirm");
 			} else if (key.tab) {
 				// Skip to manual model selection
@@ -189,6 +203,8 @@ export function GenerateScreen({
 				GENERATION_MODELS,
 				(m) => {
 					setModel(m);
+					setConfirmIndex(0);
+					setConfirmField(null);
 					setStep(modelConfig?.supportsAspect ? "aspect" : "confirm");
 				},
 				key,
@@ -214,6 +230,8 @@ export function GenerateScreen({
 			} else if (key.return) {
 				setAspect(ASPECT_RATIOS[selectedIndex] as AspectRatio);
 				setSelectedIndex(0);
+				setConfirmIndex(0);
+				setConfirmField(null);
 				setStep(modelConfig?.supportsResolution ? "resolution" : "confirm");
 			}
 		} else if (step === "resolution") {
@@ -221,16 +239,80 @@ export function GenerateScreen({
 				RESOLUTIONS,
 				(r) => {
 					setResolution(r as Resolution);
+					setConfirmIndex(0);
+					setConfirmField(null);
 					setStep("confirm");
 				},
 				key,
 				input,
 			);
 		} else if (step === "confirm") {
-			if (key.return || input === "y") {
-				runGeneration();
-			} else if (input === "n") {
-				onBack();
+			if (confirmField) {
+				// Editing a field inline
+				if (key.escape) {
+					setConfirmField(null);
+					setSelectedIndex(0);
+				} else if (confirmField === "model") {
+					handleListNavigation(
+						GENERATION_MODELS,
+						(m) => {
+							setModel(m);
+							setConfirmField(null);
+							setSelectedIndex(0);
+						},
+						key,
+						input,
+					);
+				} else if (confirmField === "aspect") {
+					handleListNavigation(
+						[...ASPECT_RATIOS] as string[] as readonly string[],
+						(a) => {
+							setAspect(a as AspectRatio);
+							setConfirmField(null);
+							setSelectedIndex(0);
+						},
+						key,
+						input,
+					);
+				} else if (confirmField === "resolution") {
+					handleListNavigation(
+						RESOLUTIONS,
+						(r) => {
+							setResolution(r as Resolution);
+							setConfirmField(null);
+							setSelectedIndex(0);
+						},
+						key,
+						input,
+					);
+				}
+			} else {
+				// Navigating confirm fields
+				const fields: ConfirmField[] = MODELS[model]?.supportsResolution
+					? ["model", "aspect", "resolution"]
+					: ["model", "aspect"];
+
+				if (key.upArrow) {
+					setConfirmIndex((i) => (i > 0 ? i - 1 : fields.length - 1));
+				} else if (key.downArrow) {
+					setConfirmIndex((i) => (i < fields.length - 1 ? i + 1 : 0));
+				} else if (key.return) {
+					// Edit the selected field
+					const field = fields[confirmIndex];
+					setConfirmField(field);
+					// Set selectedIndex to current value
+					if (field === "model") {
+						setSelectedIndex(GENERATION_MODELS.indexOf(model));
+					} else if (field === "aspect") {
+						setSelectedIndex(ASPECT_RATIOS.indexOf(aspect));
+					} else if (field === "resolution") {
+						setSelectedIndex(RESOLUTIONS.indexOf(resolution));
+					}
+				} else if (input === "y") {
+					runGeneration();
+				} else if (input === "n") {
+					onBack();
+				}
 			}
 		} else if (step === "done") {
 			if (key.upArrow) {
@@ -455,6 +537,7 @@ export function GenerateScreen({
 			{step === "confirm" && (
 				<Box flexDirection="column">
 					<Text bold>Ready to generate:</Text>
+					{confirmField && <Text dimColor>esc cancel</Text>}
 					<Box marginTop={1} flexDirection="column" marginLeft={2}>
 						<Text>
 							Prompt:{" "}
@@ -463,25 +546,107 @@ export function GenerateScreen({
 								{prompt.length > 50 ? "..." : ""}
 							</Text>
 						</Text>
-						<Text>
-							Model: <Text color="green">{MODELS[model].name}</Text>
-						</Text>
-						<Text>Aspect: {aspect}</Text>
-						{modelConfig?.supportsResolution && (
-							<Text>Resolution: {resolution}</Text>
+						{confirmField === "model" ? (
+							<Box flexDirection="column">
+								{GENERATION_MODELS.map((m, i) => (
+									<Box key={m}>
+										<Text
+											color={i === selectedIndex ? "magenta" : undefined}
+											bold={i === selectedIndex}
+										>
+											{i === selectedIndex ? "◆ " : "  "}
+											{MODELS[m].name}
+										</Text>
+									</Box>
+								))}
+							</Box>
+						) : (
+							<Text>
+								{confirmIndex === 0 && !confirmField ? "◆ " : "  "}
+								Model:{" "}
+								<Text
+									color={
+										confirmIndex === 0 && !confirmField ? "magenta" : "green"
+									}
+								>
+									{MODELS[model].name}
+								</Text>
+							</Text>
 						)}
+						{confirmField === "aspect" ? (
+							<Box flexDirection="column">
+								{ASPECT_RATIOS.map((a, i) => (
+									<Box key={a}>
+										<Text
+											color={i === selectedIndex ? "magenta" : undefined}
+											bold={i === selectedIndex}
+										>
+											{i === selectedIndex ? "◆ " : "  "}
+											{a}
+										</Text>
+									</Box>
+								))}
+							</Box>
+						) : (
+							<Text>
+								{confirmIndex === 1 && !confirmField ? "◆ " : "  "}
+								Aspect:{" "}
+								<Text
+									color={
+										confirmIndex === 1 && !confirmField ? "magenta" : undefined
+									}
+								>
+									{aspect}
+								</Text>
+							</Text>
+						)}
+						{modelConfig?.supportsResolution &&
+							(confirmField === "resolution" ? (
+								<Box flexDirection="column">
+									{RESOLUTIONS.map((r, i) => (
+										<Box key={r}>
+											<Text
+												color={i === selectedIndex ? "magenta" : undefined}
+												bold={i === selectedIndex}
+											>
+												{i === selectedIndex ? "◆ " : "  "}
+												{r}
+											</Text>
+										</Box>
+									))}
+								</Box>
+							) : (
+								<Text>
+									{confirmIndex === 2 && !confirmField ? "◆ " : "  "}
+									Resolution:{" "}
+									<Text
+										color={
+											confirmIndex === 2 && !confirmField
+												? "magenta"
+												: undefined
+										}
+									>
+										{resolution}
+									</Text>
+								</Text>
+							))}
 						<Text>
-							Est. cost: <Text color="yellow">${cost.toFixed(3)}</Text>
+							{"  "}Est. cost: <Text color="yellow">${cost.toFixed(3)}</Text>
 						</Text>
 					</Box>
-					<Box marginTop={1}>
-						<Text>Generate? </Text>
-						<Text color="green" bold>
-							[Y]es
-						</Text>
-						<Text> / </Text>
-						<Text color="red">[N]o</Text>
-					</Box>
+					{!confirmField && (
+						<Box marginTop={1} flexDirection="column">
+							<Text dimColor>↑↓ select, enter to edit</Text>
+							<Box>
+								<Text>Generate? </Text>
+								<Text color="green" bold>
+									[Y]es
+								</Text>
+								<Text> / </Text>
+								<Text color="red">[N]o</Text>
+							</Box>
+						</Box>
+					)}
 				</Box>
 			)}
 
